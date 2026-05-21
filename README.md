@@ -880,3 +880,533 @@ po-file-search/
 - 企业级权限系统接入。
 - 钉钉内部应用文件上传/单聊发送。
 - 文件正文搜索。
+
+## 共享文件范围变更操作指南
+
+当需要调整本服务允许搜索的群晖目录范围时，通常只需要修改 `config.json` 中的 `scan_roots`，不需要修改 `server` 和 `share`。
+
+例如要从原范围：
+
+```text
+\\192.168.1.26\X.artwork2\artwork
+```
+
+变更为新范围：
+
+```text
+\\192.168.1.26\X.artwork2\1.包材印刷品\01-包装印刷品
+```
+
+对应关系是：
+
+```text
+server = 192.168.1.26
+share = X.artwork2
+relative_path = 1.包材印刷品/01-包装印刷品
+```
+
+注意：
+
+- `share` 仍然是 SMB 共享文件夹名 `X.artwork2`。
+- 子目录写到 `scan_roots[].relative_path`。
+- Windows 路径中的 `\` 在 JSON 配置里建议写成 `/`。
+
+### 推荐变更步骤
+
+#### 1. 修改 config.json
+
+把原配置：
+
+```json
+"scan_roots": [
+  {
+    "name": "采购共享/artwork",
+    "path_from_mount": "采购共享",
+    "relative_path": "artwork"
+  }
+]
+```
+
+改成：
+
+```json
+"scan_roots": [
+  {
+    "name": "采购共享/包装印刷品",
+    "path_from_mount": "采购共享",
+    "relative_path": "1.包材印刷品/01-包装印刷品"
+  }
+]
+```
+
+不要把 `share` 改成完整路径。下面这种写法是错误的：
+
+```json
+"share": "X.artwork2/1.包材印刷品/01-包装印刷品"
+```
+
+#### 2. 确认新目录存在
+
+macOS：
+
+```bash
+ls -la "/Volumes/X.artwork2/1.包材印刷品/01-包装印刷品"
+```
+
+LinuxOS：
+
+```bash
+ls -la "/mnt/synology/purchase/1.包材印刷品/01-包装印刷品"
+```
+
+#### 3. 清空旧索引
+
+因为 `scan_roots[].name` 从 `采购共享/artwork` 改成了 `采购共享/包装印刷品`，旧 `root_name` 下的索引不会被新同步自动清理。
+
+为了保证索引范围干净，推荐直接删除旧索引库：
+
+```bash
+rm -f data/file_index.sqlite data/file_index.sqlite-*
+```
+
+#### 4. 重新全量同步索引
+
+```bash
+python3 -m po_file_search --config config.json index
+```
+
+成功后会输出类似：
+
+```json
+{"indexed": 12345}
+```
+
+#### 5. 重启服务
+
+如果使用 systemd：
+
+```bash
+sudo systemctl restart po-file-search
+```
+
+如果手动后台运行：
+
+```bash
+pkill -f 'python3 -m po_file_search --config config.json serve'
+nohup env searchpassword='你的群晖密码' \
+  python3 -m po_file_search --config config.json serve \
+  > /tmp/po-file-search-server.log 2>&1 &
+```
+
+#### 6. 验证服务和搜索
+
+健康检查：
+
+```bash
+curl http://你的服务器IP或域名:18765/health
+```
+
+搜索验证：
+
+```bash
+python3 -m po_file_search --config config.json search '新目录中的文件关键词' --limit 10
+```
+
+HTTP 搜索验证：
+
+```bash
+curl -X POST http://你的服务器IP或域名:18765/search_purchase_file \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"新目录中的文件关键词","limit":10}'
+```
+
+### Kimi Code 变更提示词
+
+可以把下面提示词直接交给 Kimi Code：
+
+```text
+你是资深 Python/Linux 后端工程师。请在 po-file-search 项目中帮我完成共享文件搜索范围变更，并验证程序可用。
+
+项目路径：
+/Users/mac/workspace/po-file-search
+
+当前群晖共享范围需要从：
+\\192.168.1.26\X.artwork2\artwork
+
+变更为：
+\\192.168.1.26\X.artwork2\1.包材印刷品\01-包装印刷品
+
+请注意：
+1. server 仍然是 192.168.1.26。
+2. share 仍然是 X.artwork2，不要改成完整路径。
+3. 只修改 scan_roots 中的 name 和 relative_path。
+4. relative_path 使用正斜杠：1.包材印刷品/01-包装印刷品。
+5. 推荐配置：
+
+"scan_roots": [
+  {
+    "name": "采购共享/包装印刷品",
+    "path_from_mount": "采购共享",
+    "relative_path": "1.包材印刷品/01-包装印刷品"
+  }
+]
+
+请按以下步骤执行：
+
+1. 修改 config.json 中的 scan_roots。
+2. 不要修改 mounts[].server 和 mounts[].share。
+3. 检查新目录是否存在：
+   - macOS：ls -la "/Volumes/X.artwork2/1.包材印刷品/01-包装印刷品"
+   - LinuxOS：ls -la "/mnt/synology/purchase/1.包材印刷品/01-包装印刷品"
+4. 因为 root_name 变更了，请清空旧索引：
+   rm -f data/file_index.sqlite data/file_index.sqlite-*
+5. 重新全量同步索引：
+   python3 -m po_file_search --config config.json index
+6. 重启服务：
+   如果是 systemd：sudo systemctl restart po-file-search
+   如果是手动启动：先 pkill -f 'python3 -m po_file_search --config config.json serve'，再 nohup 启动。
+7. 验证健康检查：
+   curl http://服务器IP或域名:18765/health
+8. 验证搜索：
+   python3 -m po_file_search --config config.json search '新目录中的文件关键词' --limit 10
+   或：
+   curl -X POST http://服务器IP或域名:18765/search_purchase_file \
+     -H 'Content-Type: application/json' \
+     -d '{"query":"新目录中的文件关键词","limit":10}'
+9. 如果出现错误，请查看失败日志：
+   tail -100 logs/po-file-search-error.log
+
+请输出：
+1. 修改了哪些文件。
+2. 最终 config.json 中 scan_roots 的内容。
+3. 新目录是否存在。
+4. 重新索引 indexed 数量。
+5. 服务是否重启成功。
+6. 搜索验证结果。
+```
+
+## 共享文件范围变更：macOS 与 LinuxOS 差异说明
+
+本节补充实际变更共享范围时，macOS 和 LinuxOS 的操作差异。推荐在执行范围变更前先停止服务，避免 SQLite 索引库被运行中的服务进程占用。
+
+### 通用变更流程
+
+不论 macOS 还是 LinuxOS，推荐流程都是：
+
+```text
+1. 停止 po-file-search 服务
+2. 确认新目录在挂载路径下可访问
+3. 修改 config.json 的 scan_roots
+4. 清空旧 SQLite 索引文件
+5. 手动执行一次全量同步
+6. 启动服务
+7. 健康检查、搜索验证、下载验证
+```
+
+### 为什么要先停止服务
+
+如果服务还在运行，可能持有旧的 SQLite 数据库文件。此时删除或重建索引，可能出现：
+
+```text
+sqlite3.OperationalError: attempt to write a readonly database
+sqlite3.OperationalError: disk I/O error
+```
+
+因此变更范围前建议先停止服务。
+
+### macOS 操作步骤
+
+#### 1. 停止服务
+
+如果是手动后台运行：
+
+```bash
+if [ -f /tmp/po-file-search-server.pid ]; then
+  kill $(cat /tmp/po-file-search-server.pid) 2>/dev/null || true
+fi
+pkill -f 'python3 -m po_file_search --config config.json serve' || true
+```
+
+#### 2. 确认 Finder/SMB 挂载
+
+macOS 推荐先在 Finder 里连接：
+
+```text
+smb://192.168.1.26/X.artwork2
+```
+
+程序会复用 Finder 挂载路径，例如：
+
+```text
+/Volumes/X.artwork2
+```
+
+检查新目录：
+
+```bash
+ls -la "/Volumes/X.artwork2/1.包材印刷品/01-包装印刷品"
+```
+
+如果刚调整过群晖权限但命令行看不到目录，请在 Finder 中断开 `X.artwork2` 后重新连接，再重试。
+
+#### 3. 修改 config.json
+
+```json
+"scan_roots": [
+  {
+    "name": "采购共享/包装印刷品",
+    "path_from_mount": "采购共享",
+    "relative_path": "1.包材印刷品/01-包装印刷品"
+  }
+]
+```
+
+#### 4. 清空旧索引
+
+macOS 默认 zsh 对不存在的通配符会报错，所以推荐用 Python 删除：
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+for p in Path('data').glob('file_index.sqlite*'):
+    print('remove', p)
+    p.unlink()
+PY
+```
+
+不要使用不安全的通配符命令依赖，例如在 zsh 中直接执行：
+
+```bash
+rm -f data/file_index.sqlite data/file_index.sqlite-*
+```
+
+当通配符没有匹配时可能报错。
+
+#### 5. 重新全量同步
+
+```bash
+/usr/bin/time -p env searchpassword='你的群晖密码' \
+  python3 -m po_file_search --config config.json index
+```
+
+示例结果：
+
+```text
+{"indexed": 27471}
+real 48.05
+```
+
+#### 6. 启动服务
+
+```bash
+nohup env searchpassword='你的群晖密码' \
+  python3 -m po_file_search --config config.json serve \
+  > /tmp/po-file-search-server.log 2>&1 &
+echo $! > /tmp/po-file-search-server.pid
+```
+
+#### 7. 验证
+
+健康检查：
+
+```bash
+curl http://192.168.88.20:18765/health
+```
+
+搜索验证：
+
+```bash
+python3 -m po_file_search --config config.json search 'Thumbs.db' --mode exact --limit 5
+```
+
+生成下载链接：
+
+```bash
+curl -X POST http://192.168.88.20:18765/send_purchase_file \
+  -H 'Content-Type: application/json' \
+  -d '{"file_id":8,"channel":"link","user_id":"scope-change-test"}'
+```
+
+下载验证：
+
+```bash
+curl -L -o /tmp/test-download.pdf '返回的 download_url'
+file /tmp/test-download.pdf
+```
+
+### LinuxOS 操作步骤
+
+LinuxOS 的核心区别是：通常不依赖 Finder，而是由系统或程序挂载 SMB 到 `mount_point_linux`。
+
+#### 1. 停止服务
+
+如果使用 systemd：
+
+```bash
+sudo systemctl stop po-file-search
+```
+
+如果手动后台运行：
+
+```bash
+pkill -f 'python3 -m po_file_search --config config.json serve' || true
+```
+
+#### 2. 确认 SMB 已挂载
+
+假设 Linux 挂载点为：
+
+```text
+/mnt/synology/purchase
+```
+
+检查挂载：
+
+```bash
+mountpoint -q /mnt/synology/purchase && echo mounted
+```
+
+如果未挂载，可用系统挂载或程序挂载：
+
+```bash
+sudo -E python3 -m po_file_search --config config.json mount
+```
+
+#### 3. 确认新目录存在
+
+```bash
+ls -la "/mnt/synology/purchase/1.包材印刷品/01-包装印刷品"
+```
+
+如果目录不存在，请检查：
+
+- 群晖权限是否给到 Linux 使用的账号。
+- `mounts[].share` 是否仍为 `X.artwork2`。
+- `relative_path` 是否写错。
+- Linux 是否挂载了正确的群晖共享。
+
+#### 4. 修改 config.json
+
+同 macOS：
+
+```json
+"scan_roots": [
+  {
+    "name": "采购共享/包装印刷品",
+    "path_from_mount": "采购共享",
+    "relative_path": "1.包材印刷品/01-包装印刷品"
+  }
+]
+```
+
+#### 5. 清空旧索引
+
+Linux bash 下可以执行：
+
+```bash
+rm -f data/file_index.sqlite data/file_index.sqlite-*
+```
+
+也可以使用跨平台 Python 方式：
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+for p in Path('data').glob('file_index.sqlite*'):
+    print('remove', p)
+    p.unlink()
+PY
+```
+
+#### 6. 重新全量同步
+
+```bash
+/usr/bin/time -p env searchpassword='你的群晖密码' \
+  python3 -m po_file_search --config config.json index
+```
+
+#### 7. 启动服务
+
+systemd：
+
+```bash
+sudo systemctl start po-file-search
+```
+
+或手动：
+
+```bash
+nohup env searchpassword='你的群晖密码' \
+  python3 -m po_file_search --config config.json serve \
+  > /tmp/po-file-search-server.log 2>&1 &
+```
+
+#### 8. 验证
+
+健康检查：
+
+```bash
+curl http://Linux服务器IP或域名:18765/health
+```
+
+搜索验证：
+
+```bash
+curl -X POST http://Linux服务器IP或域名:18765/search_purchase_file \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"新目录中的文件关键词","limit":10}'
+```
+
+生成下载链接验证：
+
+```bash
+curl -X POST http://Linux服务器IP或域名:18765/send_purchase_file \
+  -H 'Content-Type: application/json' \
+  -d '{"file_id":实际文件ID,"channel":"link","user_id":"scope-change-test"}'
+```
+
+### 本次实际变更结果示例
+
+本次从：
+
+```text
+\\192.168.1.26\X.artwork2\artwork
+```
+
+变更为：
+
+```text
+\\192.168.1.26\X.artwork2\1.包材印刷品\01-包装印刷品
+```
+
+最终配置：
+
+```json
+"scan_roots": [
+  {
+    "name": "采购共享/包装印刷品",
+    "path_from_mount": "采购共享",
+    "relative_path": "1.包材印刷品/01-包装印刷品"
+  }
+]
+```
+
+重新索引结果：
+
+```text
+indexed: 27471
+耗时: 约 48 秒
+```
+
+服务验证：
+
+```json
+{"ok": true}
+```
+
+下载链路验证：
+
+```text
+HTTP/1.0 200 OK
+Content-Type: application/pdf
+```
