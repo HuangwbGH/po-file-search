@@ -1,0 +1,46 @@
+{
+  "mounts": [
+    {
+      "name": "采购共享",
+      "server": "192.168.1.10",
+      "share": "purchase",
+      "mount_point_linux": "/mnt/synology/purchase",
+      "mount_point_macos": "/Volumes/采购共享",
+      "username": "readonly_user",
+      "password_env": "SYNOLOGY_PASSWORD",
+      "readonly": true,
+      "smb_version": "3.0"
+    }
+  ],
+  "index_db": "./data/file_index.sqlite",
+  "scan_roots": [
+    {
+      "name": "采购共享",
+      "path_from_mount": "采购共享",
+      "relative_path": ""
+    }
+  ],
+  "ignored_dirs": [
+    "@eaDir",
+    "#recycle",
+    ".snapshot"
+  ],
+  "max_results": 10,
+  "server": {
+    "host": "0.0.0.0",
+    "port": 18765
+  },
+  "download": {
+    "base_url": "http://files.example.com:18765",
+    "token_ttl_minutes": 30
+  },
+  "dingtalk": {
+    "webhook_env": "DINGTALK_WEBHOOK"
+  },
+  "search_mode": "smart",
+  "index": {
+    "auto_full_sync_enabled": true,
+    "full_sync_time": "23:23",
+    "full_sync_on_startup": false
+  }
+}

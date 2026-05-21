@@ -1,0 +1,15 @@
+services:
+  po-file-search:
+    build: .
+    container_name: po-file-search
+    ports:
+      - "18765:18765"
+    environment:
+      - SYNOLOGY_PASSWORD=${SYNOLOGY_PASSWORD:-}
+      - DINGTALK_WEBHOOK=${DINGTALK_WEBHOOK:-}
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+      # 推荐生产环境由宿主机挂载群晖后映射进容器。
+      # - /mnt/synology/purchase:/mnt/synology/purchase:ro
+    restart: unless-stopped
