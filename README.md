@@ -356,6 +356,317 @@ curl -X POST http://192.168.88.20:18765/send_purchase_file \
 
 浏览器打开返回的 `download_url` 即可下载。
 
+
+## LinuxOS 部署详细步骤
+
+本节说明在 LinuxOS 上部署 `po-file-search` 的完整步骤。
+
+### 1. 安装系统依赖
+
+Debian / Ubuntu：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3 python3-venv python3-pip cifs-utils curl
+```
+
+CentOS / Rocky Linux / RHEL：
+
+```bash
+sudo yum install -y python3 python3-pip cifs-utils curl
+```
+
+说明：
+
+| 依赖 | 用途 |
+|---|---|
+| `python3` | 运行程序 |
+| `cifs-utils` | 挂载群晖 SMB 共享目录 |
+| `curl` | 测试 HTTP API |
+| SQLite FTS5 | Python 标准库 `sqlite3` 通常已包含，用于本地索引 |
+
+检查 Python：
+
+```bash
+python3 --version
+```
+
+### 2. 准备项目目录
+
+进入项目目录：
+
+```bash
+cd /opt/po-file-search
+```
+
+如果是从当前代码复制到 Linux，确保目录结构类似：
+
+```text
+po-file-search/
+  README.md
+  config.example.json
+  po_file_search/
+  docs/
+  data/
+```
+
+### 3. 准备配置文件
+
+```bash
+cp config.example.json config.json
+```
+
+Linux 重点配置示例：
+
+```json
+{
+  "mounts": [
+    {
+      "name": "采购共享",
+      "server": "192.168.1.26",
+      "share": "X.artwork2",
+      "mount_point_linux": "/mnt/synology/purchase",
+      "mount_point_macos": "/Volumes/采购共享",
+      "username": "cg-name_search",
+      "password_env": "searchpassword",
+      "readonly": true,
+      "smb_version": "3.0"
+    }
+  ],
+  "scan_roots": [
+    {
+      "name": "采购共享/artwork",
+      "path_from_mount": "采购共享",
+      "relative_path": "artwork"
+    }
+  ],
+  "server": {
+    "host": "0.0.0.0",
+    "port": 18765
+  },
+  "download": {
+    "base_url": "http://Linux服务器IP或域名:18765",
+    "token_ttl_minutes": 30
+  },
+  "index": {
+    "auto_full_sync_enabled": true,
+    "full_sync_time": "23:23",
+    "full_sync_on_startup": false
+  }
+}
+```
+
+注意：
+
+- `share` 是 SMB 共享文件夹名，不是子目录。
+- 如果真实路径是 `\192.168.1.26\X.artwork2rtwork`，则：
+  - `share = X.artwork2`
+  - `relative_path = artwork`
+- `download.base_url` 必须配置为用户能访问的 Linux 服务器 IP 或域名，不要用 `127.0.0.1`。
+
+### 4. 设置群晖密码环境变量
+
+如果配置里是：
+
+```json
+"password_env": "searchpassword"
+```
+
+则 Linux 上执行：
+
+```bash
+export searchpassword='你的群晖密码'
+```
+
+如果使用 systemd 部署，建议放到环境文件，例如：
+
+```bash
+sudo mkdir -p /etc/po-file-search
+sudo tee /etc/po-file-search/env >/dev/null <<'EOF'
+searchpassword=你的群晖密码
+EOF
+sudo chmod 600 /etc/po-file-search/env
+```
+
+### 5. 挂载群晖 SMB
+
+#### 方式 A：程序执行挂载，适合测试
+
+预览挂载命令：
+
+```bash
+python3 -m po_file_search --config config.json mount --dry-run
+```
+
+执行挂载通常需要 root 权限：
+
+```bash
+sudo -E python3 -m po_file_search --config config.json mount
+```
+
+`-E` 用于保留 `searchpassword` 环境变量。
+
+#### 方式 B：系统负责挂载，推荐生产
+
+生产环境更推荐用 `/etc/fstab` 或 systemd mount 先挂载群晖，然后程序只读访问挂载目录。
+
+示例凭证文件：
+
+```bash
+sudo tee /etc/synology-credential >/dev/null <<'EOF'
+username=cg-name_search
+password=你的群晖密码
+EOF
+sudo chmod 600 /etc/synology-credential
+```
+
+手动测试挂载：
+
+```bash
+sudo mkdir -p /mnt/synology/purchase
+sudo mount -t cifs //192.168.1.26/X.artwork2 /mnt/synology/purchase   -o credentials=/etc/synology-credential,ro,vers=3.0,iocharset=utf8
+```
+
+检查挂载：
+
+```bash
+mountpoint -q /mnt/synology/purchase && echo mounted
+ls -la /mnt/synology/purchase
+ls -la /mnt/synology/purchase/artwork
+```
+
+`/etc/fstab` 示例：
+
+```text
+//192.168.1.26/X.artwork2 /mnt/synology/purchase cifs credentials=/etc/synology-credential,ro,vers=3.0,iocharset=utf8,_netdev,nofail 0 0
+```
+
+加载 fstab：
+
+```bash
+sudo mount -a
+```
+
+### 6. 手动全量同步索引
+
+首次部署后建议先手动全量同步一次：
+
+```bash
+python3 -m po_file_search --config config.json index
+```
+
+成功后输出类似：
+
+```json
+{"indexed": 92108}
+```
+
+### 7. 启动 HTTP 服务
+
+前台启动：
+
+```bash
+python3 -m po_file_search --config config.json serve
+```
+
+后台启动：
+
+```bash
+nohup env searchpassword='你的群晖密码'   python3 -m po_file_search --config config.json serve   > /tmp/po-file-search-server.log 2>&1 &
+```
+
+健康检查：
+
+```bash
+curl http://Linux服务器IP或域名:18765/health
+```
+
+预期返回：
+
+```json
+{"ok": true}
+```
+
+### 8. 搜索测试
+
+CLI 搜索：
+
+```bash
+python3 -m po_file_search --config config.json search 'DCC1039S.pdf' --mode exact --limit 0
+```
+
+HTTP 搜索：
+
+```bash
+curl -X POST http://Linux服务器IP或域名:18765/search_purchase_file   -H 'Content-Type: application/json'   -d '{"query":"DCC1039S.pdf","search_mode":"exact","limit":0}'
+```
+
+### 9. 生成下载链接测试
+
+将 `file_id` 替换为搜索结果中的 ID：
+
+```bash
+curl -X POST http://Linux服务器IP或域名:18765/send_purchase_file   -H 'Content-Type: application/json'   -d '{"file_id":21559,"channel":"link","user_id":"linux-test"}'
+```
+
+然后用返回的 `download_url` 在浏览器中下载。
+
+### 10. systemd 服务示例
+
+创建服务文件：
+
+```bash
+sudo tee /etc/systemd/system/po-file-search.service >/dev/null <<'EOF'
+[Unit]
+Description=PO File Search Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/po-file-search
+EnvironmentFile=/etc/po-file-search/env
+ExecStart=/usr/bin/python3 -m po_file_search --config config.json serve
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+启动：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable po-file-search
+sudo systemctl start po-file-search
+```
+
+查看状态：
+
+```bash
+sudo systemctl status po-file-search
+journalctl -u po-file-search -f
+```
+
+停止：
+
+```bash
+sudo systemctl stop po-file-search
+```
+
+### 11. Linux 部署常见问题
+
+| 问题 | 可能原因 | 处理方式 |
+|---|---|---|
+| `mount: bad usage` 或找不到 cifs | 未安装 `cifs-utils` | 安装 `cifs-utils` |
+| `Permission denied` | 挂载需要 root 权限 | 使用 `sudo -E` 或系统挂载 |
+| 环境变量未设置 | `password_env` 指定的环境变量不存在 | `export searchpassword=...` 或 systemd `EnvironmentFile` |
+| 下载链接打不开 | `download.base_url` 配成了 `127.0.0.1` 或防火墙未放行 | 改为服务器 IP/域名，开放端口 |
+| 搜索不到新文件 | 本地索引未同步 | 手动执行 `python3 -m po_file_search --config config.json index` 或等待每日全量同步 |
+| 容器内挂载失败 | Docker 默认无挂载权限 | 推荐宿主机挂载后 volume 只读映射 |
+
 ## 程序部署方式
 
 ### 方式一：本机直接运行

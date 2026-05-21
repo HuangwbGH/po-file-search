@@ -200,49 +200,6 @@ def index_root(con: sqlite3.Connection, root_name: str, root: Path, ignored_dirs
     return count
 
 
-def incremental_index_root(con: sqlite3.Connection, root_name: str, root: Path, ignored_dirs: set[str]) -> int:
-    """Incremental sync: walk directories, rescan only new or mtime-changed directories."""
-    count = 0
-    seen_dirs: set[str] = set()
-    stack = [root]
-    while stack:
-        directory = stack.pop()
-        try:
-            stat = directory.stat()
-            entries = list(directory.iterdir())
-        except OSError:
-            continue
-
-        directory_text = str(directory)
-        seen_dirs.add(directory_text)
-        row = con.execute(
-            "SELECT modified_time FROM directories WHERE full_path = ?",
-            (directory_text,),
-        ).fetchone()
-        changed = row is None or float(row[0]) != float(stat.st_mtime)
-
-        subdirs: list[Path] = []
-        for item in entries:
-            if item.is_dir() and not _ignored_dir(item.name, ignored_dirs):
-                subdirs.append(item)
-        stack.extend(reversed(subdirs))
-
-        if changed:
-            count += _sync_directory_files(con, root_name, root, directory)
-            _upsert_directory(con, root_name, root, directory, stat.st_mtime)
-            if count % 500 == 0:
-                con.commit()
-
-    existing_dirs = con.execute("SELECT full_path FROM directories WHERE root_name = ?", (root_name,)).fetchall()
-    stale_dirs = [row[0] for row in existing_dirs if row[0] not in seen_dirs]
-    if stale_dirs:
-        for stale_dir in stale_dirs:
-            con.execute("DELETE FROM files WHERE root_name = ? AND full_path LIKE ?", (root_name, f"{stale_dir}/%"))
-            con.execute("DELETE FROM directories WHERE full_path = ?", (stale_dir,))
-    con.commit()
-    return count
-
-
 def _scan_path(root, mounted_paths: dict[str, Path]) -> Path:
     if root.path:
         return Path(root.path)
@@ -264,15 +221,4 @@ def index_config(config: AppConfig, mounted_paths: dict[str, Path]) -> int:
             if not path.exists():
                 raise FileNotFoundError(f"Scan root does not exist: {path}")
             total += index_root(con, root.name, path, config.ignored_dirs)
-    return total
-
-
-def incremental_index_config(config: AppConfig, mounted_paths: dict[str, Path]) -> int:
-    total = 0
-    with connect(config.index_db) as con:
-        for root in config.scan_roots:
-            path = _scan_path(root, mounted_paths)
-            if not path.exists():
-                raise FileNotFoundError(f"Scan root does not exist: {path}")
-            total += incremental_index_root(con, root.name, path, config.ignored_dirs)
     return total
