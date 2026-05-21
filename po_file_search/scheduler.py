@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import AppConfig
+from .failure_log import log_failure
 from .indexer import index_config
 from .mounter import ensure_mounted
 
@@ -54,4 +55,5 @@ def _safe_full_index(config: AppConfig) -> None:
         elapsed = time.time() - started
         print(f"full index sync completed: {total} files, elapsed={elapsed:.2f}s", flush=True)
     except Exception as exc:  # pragma: no cover - background safety boundary
+        log_failure(config.logging.failure_log_file, "full_index_sync_failed", exc)
         print(f"full index sync failed: {exc}", flush=True)

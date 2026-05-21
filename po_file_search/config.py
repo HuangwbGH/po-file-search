@@ -55,6 +55,11 @@ class IndexConfig:
 
 
 @dataclass(frozen=True)
+class LoggingConfig:
+    failure_log_file: str = "./logs/po-file-search-error.log"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     mounts: list[MountConfig]
     index_db: str
@@ -66,6 +71,7 @@ class AppConfig:
     download: DownloadConfig = field(default_factory=DownloadConfig)
     dingtalk: DingtalkConfig = field(default_factory=DingtalkConfig)
     index: IndexConfig = field(default_factory=IndexConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -83,6 +89,7 @@ def load_config(path: str | Path) -> AppConfig:
         download=DownloadConfig(**raw.get("download", {})),
         dingtalk=DingtalkConfig(**raw.get("dingtalk", {})),
         index=IndexConfig(**raw.get("index", {})),
+        logging=LoggingConfig(**raw.get("logging", {})),
     )
 
 

@@ -136,6 +136,9 @@ config.json
     "auto_full_sync_enabled": true,
     "full_sync_time": "23:23",
     "full_sync_on_startup": false
+  },
+  "logging": {
+    "failure_log_file": "./logs/po-file-search-error.log"
   }
 }
 ```
@@ -215,6 +218,29 @@ config.json
 |---|---|
 | `dingtalk.webhook_env` | 钉钉 webhook 地址所在环境变量名 |
 
+### 失败运行日志配置
+
+当前运行日志只记录失败事件，不记录成功请求。
+
+```json
+"logging": {
+  "failure_log_file": "./logs/po-file-search-error.log"
+}
+```
+
+会记录的失败事件包括：
+
+- 挂载失败。
+- 手动全量同步失败。
+- 每日全量同步失败。
+- HTTP API 参数错误。
+- 生成下载链接失败。
+- 下载 token 无效或过期。
+- 下载文件不存在。
+- 未处理异常。
+
+日志格式为 JSON Lines，每行一条失败记录，包含时间、事件类型、错误类型、错误信息、上下文和异常堆栈。
+
 ### 索引同步配置
 
 | 参数 | 说明 |
@@ -222,6 +248,7 @@ config.json
 | `index.auto_full_sync_enabled` | 是否启用每日定时全量同步 |
 | `index.full_sync_time` | 每日全量同步时间，格式 `HH:MM`，默认 `23:23` |
 | `index.full_sync_on_startup` | 服务启动后是否立即执行一次全量同步 |
+| `logging.failure_log_file` | 失败运行日志文件路径，只记录失败事件 |
 
 当前暂行策略：
 
@@ -452,6 +479,9 @@ Linux 重点配置示例：
     "auto_full_sync_enabled": true,
     "full_sync_time": "23:23",
     "full_sync_on_startup": false
+  },
+  "logging": {
+    "failure_log_file": "./logs/po-file-search-error.log"
   }
 }
 ```
@@ -785,6 +815,9 @@ python3 -m po_file_search --config config.json search '关键词' --mode exact
 
 # 启动 HTTP API 服务
 python3 -m po_file_search --config config.json serve
+
+# 查看失败运行日志
+tail -f logs/po-file-search-error.log
 
 # Docker 启动
 docker compose up -d --build

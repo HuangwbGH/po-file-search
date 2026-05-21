@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .config import load_config
+from .failure_log import log_failure
 from .indexer import index_config
 from .mounter import ensure_mounted, mount_point_for
 from .platforms import detect_os
@@ -49,13 +50,21 @@ def main() -> None:
     config = load_config(args.config)
 
     if args.command == "mount":
-        mounted = _mount_all(args.config, dry_run=args.dry_run)
+        try:
+            mounted = _mount_all(args.config, dry_run=args.dry_run)
+        except Exception as exc:
+            log_failure(config.logging.failure_log_file, "mount_failed", exc, dry_run=args.dry_run)
+            raise
         print(json.dumps({k: str(v) for k, v in mounted.items()}, ensure_ascii=False, indent=2))
         return
 
     if args.command == "index":
         mounted = {mount.name: mount_point_for(mount) for mount in config.mounts} if args.no_mount else _mount_all(args.config)
-        total = index_config(config, mounted)
+        try:
+            total = index_config(config, mounted)
+        except Exception as exc:
+            log_failure(config.logging.failure_log_file, "manual_full_index_failed", exc)
+            raise
         print(json.dumps({"indexed": total}, ensure_ascii=False))
         return
 

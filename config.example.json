@@ -42,5 +42,8 @@
     "auto_full_sync_enabled": true,
     "full_sync_time": "23:23",
     "full_sync_on_startup": false
+  },
+  "logging": {
+    "failure_log_file": "./logs/po-file-search-error.log"
   }
 }

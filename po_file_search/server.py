@@ -11,6 +11,7 @@ from urllib.parse import unquote
 from .audit import log_event
 from .config import AppConfig, load_config
 from .downloads import get_download_file
+from .failure_log import log_failure
 from .searcher import search
 from .sender import SendError, send_purchase_file
 from .scheduler import start_index_scheduler
@@ -42,10 +43,12 @@ class ApiHandler(BaseHTTPRequestHandler):
             token = unquote(self.path.removeprefix("/download/").split("?", 1)[0])
             item = get_download_file(self.config.index_db, token)
             if not item:
+                log_failure(self.config.logging.failure_log_file, "download_token_invalid", "download token not found or expired", token=token)
                 self._json(404, {"error": "download token not found or expired"})
                 return
             path = Path(str(item["full_path"]))
             if not path.exists() or not path.is_file():
+                log_failure(self.config.logging.failure_log_file, "download_file_not_found", "file not found", token=token, path=str(path))
                 self._json(404, {"error": "file not found"})
                 return
             content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
@@ -105,10 +108,13 @@ class ApiHandler(BaseHTTPRequestHandler):
 
             self._json(404, {"error": "not found"})
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
+            log_failure(self.config.logging.failure_log_file, "bad_request", exc, path=self.path)
             self._json(400, {"error": str(exc)})
         except SendError as exc:
+            log_failure(self.config.logging.failure_log_file, "send_failed", exc, path=self.path)
             self._json(409, {"error": str(exc)})
         except Exception as exc:  # pragma: no cover - defensive API boundary
+            log_failure(self.config.logging.failure_log_file, "api_unhandled_error", exc, path=self.path)
             self._json(500, {"error": str(exc)})
 
     def log_message(self, format: str, *args: object) -> None:
